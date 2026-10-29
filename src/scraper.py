@@ -46,6 +46,16 @@ class CryptoScraper:
             json.dump(records.to_dict(orient='records'), f)
     
     def fetch_prices(self, symbol: str = "bitcoin", days: int = 30) -> pd.DataFrame:
+        """
+        Fetches historical price data for a cryptocurrency.
+        
+        Args:
+            symbol: Coin ID (e.g., 'bitcoin', 'ethereum')
+            days: Number of days of historical data
+            
+        Returns:
+            DataFrame with 'date' and 'price' columns
+        """
         cache_path = self._get_cache_path(symbol)
         
         # 1. Try Cache
@@ -82,3 +92,87 @@ class CryptoScraper:
             
             print("[CRITICAL] No data available at all.")
             return pd.DataFrame(columns=['date', 'price'])
+    
+    def get_current_price(self, symbol: str = "bitcoin") -> dict:
+        """
+        Fetches the current real-time price of a cryptocurrency.
+        
+        Returns:
+            Dictionary with 'price', 'currency', and 'timestamp'
+        """
+        cache_path = self.cache_dir / f"{symbol}_current.json"
+        
+        # Try cache first (cache for 5 minutes)
+        if self._is_cache_valid(cache_path):
+            print(f"[INFO] Using cached current price for {symbol}")
+            with open(cache_path, 'r') as f:
+                return json.load(f)
+        
+        # Try API
+        try:
+            print(f"[INFO] Fetching current price for {symbol}...")
+            url = f"{self.api_url}/simple/price"
+            params = {
+                "ids": symbol,
+                "vs_currencies": "usd",
+                "include_last_updated_at": "true"
+            }
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if symbol not in data:
+                raise ValueError(f"No data for {symbol}")
+            
+            result = {
+                "price": data[symbol]["usd"],
+                "currency": "USD",
+                "timestamp": datetime.fromtimestamp(data[symbol]["last_updated_at"]).isoformat()
+            }
+            
+            # Save to cache
+            with open(cache_path, 'w') as f:
+                json.dump(result, f)
+            
+            print(f"[SUCCESS] Current price: ${result['price']:,.2f}")
+            return result
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch current price: {e}")
+            
+            # Fallback to sample data
+            if self.sample_data_path.exists():
+                print("[WARNING] Using sample data for current price")
+                with open(self.sample_data_path, 'r') as f:
+                    sample_data = json.load(f)
+                last_record = sample_data[-1]
+                return {
+                    "price": last_record["price"],
+                    "currency": "USD",
+                    "timestamp": last_record["date"],
+                    "note": "SAMPLE DATA (API unavailable)"
+                }
+            
+            return {"price": None, "currency": "USD", "timestamp": None, "error": str(e)}
+
+
+# Quick test
+if __name__ == "__main__":
+    scraper = CryptoScraper()
+    
+    # Test historical data
+    print("=" * 60)
+    print("Testing Historical Data Fetch")
+    print("=" * 60)
+    df = scraper.fetch_prices("bitcoin", days=7)
+    print("\nLast 5 records:")
+    print(df.tail())
+    
+    # Test current price
+    print("\n" + "=" * 60)
+    print("Testing Current Price Fetch")
+    print("=" * 60)
+    current = scraper.get_current_price("bitcoin")
+    print(f"\nCurrent Price Info: {current}")
+    
