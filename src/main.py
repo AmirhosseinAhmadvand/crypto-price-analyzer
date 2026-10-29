@@ -1,6 +1,6 @@
 """
 Main entry point for the Crypto Price Analyzer.
-Orchestrates data fetching and analysis.
+Shows real-time price and trend analysis.
 """
 
 import sys
@@ -19,43 +19,53 @@ def main():
     print("CRYPTO PRICE ANALYZER")
     print("=" * 60)
     
-    # Configuration
     symbol = "bitcoin"
     days = 30
     
-    print(f"\n[1/3] Fetching data for {symbol} (last {days} days)...")
-    
-    # Step 1: Fetch data
+    # Step 1: Get current price
+    print(f"\n[1/4] Fetching current price for {symbol}...")
     scraper = CryptoScraper(cache_dir="data", cache_hours=1)
+    current_data = scraper.get_current_price(symbol)
+    
+    if current_data.get("price") is None:
+        print("\n[ERROR] Cannot fetch current price. Exiting.")
+        sys.exit(1)
+    
+    print(f"[SUCCESS] Current Price: ${current_data['price']:,.2f} {current_data['currency']}")
+    print(f"[INFO] Updated at: {current_data['timestamp']}")
+    if current_data.get("note"):
+        print(f"[WARNING] {current_data['note']}")
+    
+    # Step 2: Fetch historical data
+    print(f"\n[2/4] Fetching historical data (last {days} days)...")
     df = scraper.fetch_prices(symbol, days)
     
     if df.empty:
-        print("\n[ERROR] No data available. Exiting.")
+        print("\n[ERROR] No historical data available. Exiting.")
         sys.exit(1)
     
-    print(f"[SUCCESS] Fetched {len(df)} price records")
+    print(f"[SUCCESS] Fetched {len(df)} records")
     
-    # Step 2: Analyze data
-    print(f"\n[2/3] Analyzing trends...")
+    # Step 3: Analyze trends
+    print(f"\n[3/4] Analyzing trends...")
     analyzer = CryptoAnalyzer(short_window=7, long_window=14)
     analyzed_df, signal = analyzer.analyze(df)
     
-    # Step 3: Display results
-    print(f"\n[3/3] Results:")
+    # Step 4: Display results
+    print(f"\n[4/4] Analysis Results:")
     print("-" * 60)
     print(f"Symbol: {symbol.upper()}")
-    print(f"Latest Price: ${signal['price']:,.2f}")
-    print(f"Date: {signal['date']}")
-    print(f"Trend: {signal['trend']}")
+    print(f"Current Price: ${current_data['price']:,.2f}")
+    print(f"Trend (30-day): {signal['trend']}")
     print(f"Signal: {signal['signal']}")
     print("-" * 60)
     
     if signal['signal'] == 'BUY':
-        print("\n💡 Recommendation: Consider buying (short-term MA above long-term MA)")
+        print("\n💡 Recommendation: Consider buying")
     elif signal['signal'] == 'SELL':
-        print("\n💡 Recommendation: Consider selling (short-term MA below long-term MA)")
+        print("\n💡 Recommendation: Consider selling")
     else:
-        print("\n💡 Recommendation: Hold position (no clear signal)")
+        print("\n💡 Recommendation: Hold position")
     
     # Save results
     output_path = Path("data") / f"{symbol}_analysis.csv"
