@@ -1,6 +1,6 @@
 """
-Module for fetching cryptocurrency data from CoinGecko API.
-Includes caching and fallback mechanisms for reliability.
+Module for fetching cryptocurrency data.
+Includes caching, fallback to sample data, and error handling.
 """
 
 import requests
@@ -19,48 +19,41 @@ class CryptoScraper:
         self.cache_dir.mkdir(exist_ok=True)
         self.cache_hours = cache_hours
         self.api_url = "https://api.coingecko.com/api/v3"
+        # مسیر فایل نمونه که ساختیم
+        self.sample_data_path = self.cache_dir / "sample_data.json"
     
     def _get_cache_path(self, symbol: str) -> Path:
-        """Returns the cache file path for a given symbol."""
         return self.cache_dir / f"{symbol}_cache.json"
     
     def _is_cache_valid(self, cache_path: Path) -> bool:
-        """Checks if cache file exists and is not expired."""
         if not cache_path.exists():
             return False
         cache_time = datetime.fromtimestamp(cache_path.stat().st_mtime)
         return (datetime.now() - cache_time) < timedelta(hours=self.cache_hours)
     
-    def _load_from_cache(self, cache_path: Path) -> pd.DataFrame:
-        """Loads data from cache file."""
-        with open(cache_path, 'r') as f:
+    def _load_json(self, path: Path) -> pd.DataFrame:
+        with open(path, 'r') as f:
             data = json.load(f)
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        df['date'] = pd.to_datetime(df['date'])
+        return df
     
     def _save_to_cache(self, df: pd.DataFrame, cache_path: Path):
-        """Saves data to cache file."""
+        # تبدیل به فرمت قابل ذخیره
+        records = df.copy()
+        records['date'] = records['date'].astype(str)
         with open(cache_path, 'w') as f:
-            json.dump(df.to_dict(orient='records'), f)
+            json.dump(records.to_dict(orient='records'), f)
     
     def fetch_prices(self, symbol: str = "bitcoin", days: int = 30) -> pd.DataFrame:
-        """
-        Fetches historical price data for a cryptocurrency.
-        
-        Args:
-            symbol: Coin ID (e.g., 'bitcoin', 'ethereum')
-            days: Number of days of historical data
-            
-        Returns:
-            DataFrame with 'date' and 'price' columns
-        """
         cache_path = self._get_cache_path(symbol)
         
-        # Try cache first
+        # 1. Try Cache
         if self._is_cache_valid(cache_path):
             print(f"[INFO] Using cached data for {symbol}")
-            return self._load_from_cache(cache_path)
+            return self._load_json(cache_path)
         
-        # Try API
+        # 2. Try API
         try:
             print(f"[INFO] Fetching data from API for {symbol}...")
             url = f"{self.api_url}/coins/{symbol}/market_chart"
@@ -71,34 +64,21 @@ class CryptoScraper:
             data = response.json()
             prices = data.get('prices', [])
             
-            if not prices:
-                raise ValueError(f"No price data returned for {symbol}")
-            
             df = pd.DataFrame(prices, columns=['timestamp', 'price'])
             df['date'] = pd.to_datetime(df['timestamp'], unit='ms')
             df = df[['date', 'price']]
             
-            # Save to cache
             self._save_to_cache(df, cache_path)
             print(f"[SUCCESS] Fetched and cached {len(df)} records")
             return df
             
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             print(f"[ERROR] API request failed: {e}")
             
-            # Fallback to expired cache if exists
-            if cache_path.exists():
-                print("[WARNING] Using expired cache as fallback")
-                return self._load_from_cache(cache_path)
+            # 3. Fallback to Sample Data (اگر اینترنت قطع بود)
+            if self.sample_data_path.exists():
+                print("[WARNING] API failed. Loading sample data for demonstration...")
+                return self._load_json(self.sample_data_path)
             
-            # Final fallback: return empty DataFrame
-            print("[WARNING] No data available, returning empty DataFrame")
+            print("[CRITICAL] No data available at all.")
             return pd.DataFrame(columns=['date', 'price'])
-
-
-# Quick test
-if __name__ == "__main__":
-    scraper = CryptoScraper()
-    df = scraper.fetch_prices("bitcoin", days=7)
-    print("\nLast 5 records:")
-    print(df.tail())
